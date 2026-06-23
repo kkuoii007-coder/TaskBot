@@ -85,7 +85,7 @@ async def process_task_text(message: Message, state: FSMContext, db: aiosqlite.C
     )
 
 
-@tasks_router.callback_query(F.data.startswith("priority:"), AddTask.waiting_for_priority)
+@tasks_router.callback_query(F.data.startswith("priority:"), AddTask.waiting_for_priority, state="*")
 async def process_priority(callback: CallbackQuery, state: FSMContext, db: aiosqlite.Connection) -> None:
     """
     Обработчик выбора приоритета.
@@ -107,7 +107,7 @@ async def process_priority(callback: CallbackQuery, state: FSMContext, db: aiosq
     await callback.answer()
 
 
-@tasks_router.callback_query(F.data == "skip:deadline", AddTask.waiting_for_deadline)
+@tasks_router.callback_query(F.data == "skip:deadline", AddTask.waiting_for_deadline, state="*")
 async def process_skip_deadline(callback: CallbackQuery, state: FSMContext, db: aiosqlite.Connection) -> None:
     """
     Обработчик пропуска дедлайна.
@@ -163,7 +163,7 @@ async def process_deadline(message: Message, state: FSMContext, db: aiosqlite.Co
     )
 
 
-@tasks_router.callback_query(F.data == "skip:assignee", AddTask.waiting_for_assignee)
+@tasks_router.callback_query(F.data == "skip:assignee", AddTask.waiting_for_assignee, state="*")
 async def process_skip_assignee(callback: CallbackQuery, state: FSMContext, db: aiosqlite.Connection) -> None:
     """
     Обработчик пропуска исполнителя.
@@ -306,14 +306,18 @@ async def cmd_done(message: Message, state: FSMContext, db: aiosqlite.Connection
 
     parts = message.text.split()
     if len(parts) < 2:
+        logger.warning("Команда /done без ID от user_id=%s", message.from_user.id)
         await message.answer("⚠️ Укажите ID задачи: /done <id>")
         return
 
     try:
         task_id = int(parts[1])
     except ValueError:
+        logger.warning("Неверный ID задачи в /done: %s", parts[1])
         await message.answer("❌ ID задачи должен быть числом.")
         return
+
+    logger.info("Обработка /done для задачи #%s, user_id=%s", task_id, message.from_user.id)
 
     try:
         task = await get_task_by_id(db, task_id)
@@ -330,10 +334,12 @@ async def cmd_done(message: Message, state: FSMContext, db: aiosqlite.Connection
 
         if success:
             await message.answer(f"✅ Задача #{task_id} отмечена как выполненная.")
+            logger.info("Задача #%s отмечена как выполненная", task_id)
         else:
             await message.answer("❌ Не удалось обновить статус задачи.")
 
     except Exception as e:
+        logger.error("Ошибка в /done: %s", e)
         await message.answer(f"❌ Ошибка: {e}")
 
 
@@ -396,14 +402,18 @@ async def cmd_status(message: Message, state: FSMContext, db: aiosqlite.Connecti
 
     parts = message.text.split()
     if len(parts) < 2:
+        logger.warning("Команда /status без ID от user_id=%s", message.from_user.id)
         await message.answer("⚠️ Укажите ID задачи: /status <id>")
         return
 
     try:
         task_id = int(parts[1])
     except ValueError:
+        logger.warning("Неверный ID задачи в /status: %s", parts[1])
         await message.answer("❌ ID задачи должен быть числом.")
         return
+
+    logger.info("Обработка /status для задачи #%s, user_id=%s", task_id, message.from_user.id)
 
     try:
         task = await get_task_by_id(db, task_id)
@@ -420,8 +430,10 @@ async def cmd_status(message: Message, state: FSMContext, db: aiosqlite.Connecti
             parse_mode="HTML",
             reply_markup=keyboard,
         )
+        logger.info("Показаны кнопки статуса для задачи #%s", task_id)
 
     except Exception as e:
+        logger.error("Ошибка в /status: %s", e)
         await message.answer(f"❌ Ошибка: {e}")
 
 
@@ -443,16 +455,20 @@ async def cmd_delete(message: Message, state: FSMContext, db: aiosqlite.Connecti
 
     parts = message.text.split()
     if len(parts) < 2:
+        logger.warning("Команда /delete без ID от user_id=%s", message.from_user.id)
         await message.answer("⚠️ Укажите ID задачи: /delete <id>")
         return
 
     try:
         task_id = int(parts[1])
     except ValueError:
+        logger.warning("Неверный ID задачи в /delete: %s", parts[1])
         await message.answer("❌ ID задачи должен быть числом.")
         return
 
     user_id = message.from_user.id
+
+    logger.info("Обработка /delete для задачи #%s, user_id=%s", task_id, user_id)
 
     try:
         task = await get_task_by_id(db, task_id)
@@ -482,6 +498,7 @@ async def cmd_delete(message: Message, state: FSMContext, db: aiosqlite.Connecti
 
         if success:
             await message.answer(f"🗑️ Задача #{task_id} удалена.")
+            logger.info("Задача #%s удалена пользователем %s", task_id, user_id)
         else:
             await message.answer("❌ Не удалось удалить задачу.")
 
@@ -491,7 +508,7 @@ async def cmd_delete(message: Message, state: FSMContext, db: aiosqlite.Connecti
 
 
 # Обработка callback-вызовов для изменения статуса задачи.
-@tasks_router.callback_query(F.data.startswith("status:"))
+@tasks_router.callback_query(F.data.startswith("status:"), state="*")
 async def process_status_change(callback: CallbackQuery, state: FSMContext, db: aiosqlite.Connection) -> None:
     """
     Обработчик изменения статуса задачи через inline-кнопки.
