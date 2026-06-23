@@ -48,6 +48,12 @@ class AddTask(StatesGroup):
     waiting_for_assignee = State()    # Ожидание исполнителя
 
 
+# Состояния FSM для команд с ID задачи.
+class TaskAction(StatesGroup):
+    """Группа состояний для действий с задачей (done, cancel, delete, status)."""
+    waiting_for_task_id = State()
+
+
 @tasks_router.message(Command("add"))
 async def cmd_add(message: Message, state: FSMContext, db: aiosqlite.Connection) -> None:
     """
@@ -294,218 +300,174 @@ async def cmd_my(message: Message, db: aiosqlite.Connection) -> None:
 @tasks_router.message(Command("done"))
 async def cmd_done(message: Message, state: FSMContext, db: aiosqlite.Connection) -> None:
     """
-    Обработчик команды /done <id>.
+    Обработчик команды /done.
 
-    Помечает задачу как выполненную.
+    Запускает диалог для отметки задачи как выполненной.
+    Бот запрашивает ID задачи.
 
     Аргументы:
-        message - входящее сообщение с ID задачи.
-        state   - контекст FSM (для очистки состояния).
+        message - входящее сообщение от пользователя.
+        state   - контекст FSM.
         db      - подключение к базе данных (из middleware).
     """
-    await state.clear()
-
-    parts = message.text.split()
-    if len(parts) < 2:
-        logger.warning("Команда /done без ID от user_id=%s", message.from_user.id)
-        await message.answer("⚠️ Укажите ID задачи: /done <id>")
-        return
-
-    try:
-        task_id = int(parts[1])
-    except ValueError:
-        logger.warning("Неверный ID задачи в /done: %s", parts[1])
-        await message.answer("❌ ID задачи должен быть числом.")
-        return
-
-    logger.info("Обработка /done для задачи #%s, user_id=%s", task_id, message.from_user.id)
-
-    try:
-        task = await get_task_by_id(db, task_id)
-
-        if not task:
-            await message.answer(f"❌ Задача #{task_id} не найдена.")
-            return
-
-        if task["status"] == "done":
-            await message.answer(f"⚠️ Задача #{task_id} уже выполнена.")
-            return
-
-        success = await update_task_status(db, task_id, "done")
-
-        if success:
-            await message.answer(f"✅ Задача #{task_id} отмечена как выполненная.")
-            logger.info("Задача #%s отмечена как выполненная", task_id)
-        else:
-            await message.answer("❌ Не удалось обновить статус задачи.")
-
-    except Exception as e:
-        logger.error("Ошибка в /done: %s", e)
-        await message.answer(f"❌ Ошибка: {e}")
+    await state.set_state(TaskAction.waiting_for_task_id)
+    await state.update_data(action="done")
+    await message.answer("✏️ Введите ID задачи, которую нужно отметить как выполненную:\n\n(или /cancel для отмены)")
 
 
 @tasks_router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext, db: aiosqlite.Connection) -> None:
     """
-    Обработчик команды /cancel <id>.
+    Обработчик команды /cancel.
 
-    Отменяет задачу (устанавливает статус 'cancelled').
+    Запускает диалог для отмены задачи.
+    Бот запрашивает ID задачи.
 
     Аргументы:
-        message - входящее сообщение с ID задачи.
+        message - входящее сообщение от пользователя.
         state   - контекст FSM.
         db      - подключение к базе данных (из middleware).
     """
-    await state.clear()
-
-    parts = message.text.split()
-    if len(parts) < 2:
-        await message.answer("⚠️ Укажите ID задачи: /cancel <id>")
-        return
-
-    try:
-        task_id = int(parts[1])
-    except ValueError:
-        await message.answer("❌ ID задачи должен быть числом.")
-        return
-
-    try:
-        task = await get_task_by_id(db, task_id)
-
-        if not task:
-            await message.answer(f"❌ Задача #{task_id} не найдена.")
-            return
-
-        success = await cancel_task(db, task_id)
-
-        if success:
-            await message.answer(f"❌ Задача #{task_id} отменена.")
-        else:
-            await message.answer("❌ Не удалось отменить задачу.")
-
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
-
-
-@tasks_router.message(Command("status"))
-async def cmd_status(message: Message, state: FSMContext, db: aiosqlite.Connection) -> None:
-    """
-    Обработчик команды /status <id>.
-
-    Показывает inline-кнопки для изменения статуса задачи.
-
-    Аргументы:
-        message - входящее сообщение с ID задачи.
-        state   - контекст FSM.
-        db      - подключение к базе данных (из middleware).
-    """
-    await state.clear()
-
-    parts = message.text.split()
-    if len(parts) < 2:
-        logger.warning("Команда /status без ID от user_id=%s", message.from_user.id)
-        await message.answer("⚠️ Укажите ID задачи: /status <id>")
-        return
-
-    try:
-        task_id = int(parts[1])
-    except ValueError:
-        logger.warning("Неверный ID задачи в /status: %s", parts[1])
-        await message.answer("❌ ID задачи должен быть числом.")
-        return
-
-    logger.info("Обработка /status для задачи #%s, user_id=%s", task_id, message.from_user.id)
-
-    try:
-        task = await get_task_by_id(db, task_id)
-
-        if not task:
-            await message.answer(f"❌ Задача #{task_id} не найдена.")
-            return
-
-        card = format_task_card(task)
-        keyboard = get_status_keyboard(task["status"], task_id)
-
-        await message.answer(
-            f"🔄 Изменить статус задачи #{task_id}:\n\n{card}",
-            parse_mode="HTML",
-            reply_markup=keyboard,
-        )
-        logger.info("Показаны кнопки статуса для задачи #%s", task_id)
-
-    except Exception as e:
-        logger.error("Ошибка в /status: %s", e)
-        await message.answer(f"❌ Ошибка: {e}")
+    await state.set_state(TaskAction.waiting_for_task_id)
+    await state.update_data(action="cancel")
+    await message.answer("✏️ Введите ID задачи, которую нужно отменить:\n\n(или /cancel для отмены)")
 
 
 @tasks_router.message(Command("delete"))
 async def cmd_delete(message: Message, state: FSMContext, db: aiosqlite.Connection) -> None:
     """
-    Обработчик команды /delete <id>.
+    Обработчик команды /delete.
 
-    Удаляет задачу. Правила:
-    - Автор может удалить свою задачу в любое время.
-    - Любой пользователь может удалить задачу в течение 1 часа после создания.
+    Запускает диалог для удаления задачи.
+    Бот запрашивает ID задачи.
 
     Аргументы:
-        message - входящее сообщение с ID задачи.
+        message - входящее сообщение от пользователя.
         state   - контекст FSM.
         db      - подключение к базе данных (из middleware).
     """
-    await state.clear()
+    await state.set_state(TaskAction.waiting_for_task_id)
+    await state.update_data(action="delete")
+    await message.answer("✏️ Введите ID задачи, которую нужно удалить:\n\n(или /cancel для отмены)")
 
-    parts = message.text.split()
-    if len(parts) < 2:
-        logger.warning("Команда /delete без ID от user_id=%s", message.from_user.id)
-        await message.answer("⚠️ Укажите ID задачи: /delete <id>")
+
+@tasks_router.message(Command("status"))
+async def cmd_status(message: Message, state: FSMContext, db: aiosqlite.Connection) -> None:
+    """
+    Обработчик команды /status.
+
+    Запускает диалог для изменения статуса задачи.
+    Бот запрашивает ID задачи.
+
+    Аргументы:
+        message - входящее сообщение от пользователя.
+        state   - контекст FSM.
+        db      - подключение к базе данных (из middleware).
+    """
+    await state.set_state(TaskAction.waiting_for_task_id)
+    await state.update_data(action="status")
+    await message.answer("✏️ Введите ID задачи для изменения статуса:\n\n(или /cancel для отмены)")
+
+
+# Обработка ввода ID задачи для действий (done, cancel, delete, status).
+@tasks_router.message(TaskAction.waiting_for_task_id)
+async def process_task_action(message: Message, state: FSMContext, db: aiosqlite.Connection) -> None:
+    """
+    Обработчик ввода ID задачи для выполнения действия.
+
+    Аргументы:
+        message - входящее сообщение с ID задачи.
+        state   - контекст FSM (содержит тип действия).
+        db      - подключение к базе данных (из middleware).
+    """
+    # Проверяем, не отмена ли это.
+    if message.text.strip().lower() in ("/cancel", "отмена", "cancel"):
+        await state.clear()
+        await message.answer("❌ Отменено.")
         return
 
+    # Парсим ID задачи.
     try:
-        task_id = int(parts[1])
+        task_id = int(message.text.strip())
     except ValueError:
-        logger.warning("Неверный ID задачи в /delete: %s", parts[1])
-        await message.answer("❌ ID задачи должен быть числом.")
+        await message.answer("❌ ID задачи должен быть числом.\n\nВведите корректный ID или /cancel для отмены:")
         return
 
-    user_id = message.from_user.id
+    # Получаем тип действия из состояния.
+    data = await state.get_data()
+    action = data.get("action")
 
-    logger.info("Обработка /delete для задачи #%s, user_id=%s", task_id, user_id)
+    logger.info("Обработка действия '%s' для задачи #%s, user_id=%s", action, task_id, message.from_user.id)
 
     try:
         task = await get_task_by_id(db, task_id)
 
         if not task:
             await message.answer(f"❌ Задача #{task_id} не найдена.")
+            await state.clear()
             return
 
-        # Проверяем, является ли пользователь автором задачи.
-        is_author = task["user_id"] == user_id
+        # Проверяем авторство для delete.
+        if action == "delete":
+            user_id = message.from_user.id
+            is_author = task["user_id"] == user_id
 
-        # Если не автор — проверяем, не прошёл ли 1 час с момента создания.
-        if not is_author:
-            created_at = datetime.fromisoformat(task["created_at"])
-            elapsed = datetime.now() - created_at
+            if not is_author:
+                created_at = datetime.fromisoformat(task["created_at"])
+                elapsed = datetime.now() - created_at
 
-            if elapsed > timedelta(hours=1):
-                await message.answer(
-                    "❌ Удалить задачу может только её автор. "
-                    "Срок удаления (1 час) уже истёк."
-                )
-                return
+                if elapsed > timedelta(hours=1):
+                    await message.answer(
+                        "❌ Удалить задачу может только её автор. "
+                        "Срок удаления (1 час) уже истёк."
+                    )
+                    await state.clear()
+                    return
 
-        # Выполняем удаление: автор может удалить всегда,
-        # не-автор — только в течение 1 часа (проверено выше).
-        success = await delete_task(db, task_id, user_id, is_admin=is_author)
+            success = await delete_task(db, task_id, user_id, is_admin=is_author)
+            if success:
+                await message.answer(f"🗑️ Задача #{task_id} удалена.")
+                logger.info("Задача #%s удалена пользователем %s", task_id, user_id)
+            else:
+                await message.answer("❌ Не удалось удалить задачу.")
 
-        if success:
-            await message.answer(f"🗑️ Задача #{task_id} удалена.")
-            logger.info("Задача #%s удалена пользователем %s", task_id, user_id)
-        else:
-            await message.answer("❌ Не удалось удалить задачу.")
+        elif action == "done":
+            if task["status"] == "done":
+                await message.answer(f"⚠️ Задача #{task_id} уже выполнена.")
+            else:
+                success = await update_task_status(db, task_id, "done")
+                if success:
+                    await message.answer(f"✅ Задача #{task_id} отмечена как выполненная.")
+                    logger.info("Задача #%s отмечена как выполненная", task_id)
+                else:
+                    await message.answer("❌ Не удалось обновить статус задачи.")
+
+        elif action == "cancel":
+            success = await cancel_task(db, task_id)
+            if success:
+                await message.answer(f"❌ Задача #{task_id} отменена.")
+                logger.info("Задача #%s отменена", task_id)
+            else:
+                await message.answer("❌ Не удалось отменить задачу.")
+
+        elif action == "status":
+            card = format_task_card(task)
+            keyboard = get_status_keyboard(task["status"], task_id)
+            await message.answer(
+                f"🔄 Изменить статус задачи #{task_id}:\n\n{card}",
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+            logger.info("Показаны кнопки статуса для задачи #%s", task_id)
+            # Не очищаем state, чтобы можно было изменить статус через callback.
+            return
+
+        await state.clear()
 
     except Exception as e:
-        logger.error("Ошибка при удалении задачи #%s: %s", task_id, e)
+        logger.error("Ошибка при выполнении действия '%s': %s", action, e)
         await message.answer(f"❌ Ошибка: {e}")
+        await state.clear()
 
 
 # Обработка callback-вызовов для изменения статуса задачи.
@@ -551,4 +513,5 @@ async def process_status_change(callback: CallbackQuery, state: FSMContext, db: 
             await callback.answer("❌ Не удалось обновить статус.")
 
     except Exception as e:
+        logger.error("Ошибка при изменении статуса: %s", e)
         await callback.answer(f"❌ Ошибка: {e}")
