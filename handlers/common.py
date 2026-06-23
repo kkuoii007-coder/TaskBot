@@ -50,16 +50,16 @@ async def cmd_help(message: Message, db: aiosqlite.Connection) -> None:
         db      - подключение к базе данных (из middleware).
     """
     help_text = (
-        "📋 *Список команд:*\n\n"
+        "<b>📋 Список команд:</b>\n\n"
         "• /add — Создать новую задачу (пошаговый диалог)\n"
         "• /list — Показать все активные задачи команды\n"
         "• /my — Показать задачи, созданные вами\n"
-        "• /done <id> — Отметить задачу как выполненную\n"
-        "• /cancel <id> — Отменить задачу\n"
-        "• /status <id> — Изменить статус через кнопки\n"
-        "• /delete <id> — Удалить задачу (только автор)\n"
+        "• /done &lt;id&gt; — Отметить задачу как выполненную\n"
+        "• /cancel &lt;id&gt; — Отменить задачу\n"
+        "• /status &lt;id&gt; — Изменить статус через кнопки\n"
+        "• /delete &lt;id&gt; — Удалить задачу (только автор)\n"
         "• /list_csv — Экспорт всех задач в CSV-файл\n"
         "• /help — Показать этот список команд"
     )
 
-    await message.answer(help_text, parse_mode="Markdown")
+    await message.answer(help_text, parse_mode="HTML")
