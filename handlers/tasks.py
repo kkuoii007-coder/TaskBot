@@ -13,6 +13,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.filters import StateFilter
 
 from keyboards.inline import (
     get_priority_keyboard,
@@ -85,7 +86,7 @@ async def process_task_text(message: Message, state: FSMContext, db: aiosqlite.C
     )
 
 
-@tasks_router.callback_query(F.data.startswith("priority:"), AddTask.waiting_for_priority, state="*")
+@tasks_router.callback_query(F.data.startswith("priority:"), StateFilter(AddTask.waiting_for_priority))
 async def process_priority(callback: CallbackQuery, state: FSMContext, db: aiosqlite.Connection) -> None:
     """
     Обработчик выбора приоритета.
@@ -107,7 +108,7 @@ async def process_priority(callback: CallbackQuery, state: FSMContext, db: aiosq
     await callback.answer()
 
 
-@tasks_router.callback_query(F.data == "skip:deadline", AddTask.waiting_for_deadline, state="*")
+@tasks_router.callback_query(F.data == "skip:deadline", StateFilter(AddTask.waiting_for_deadline))
 async def process_skip_deadline(callback: CallbackQuery, state: FSMContext, db: aiosqlite.Connection) -> None:
     """
     Обработчик пропуска дедлайна.
@@ -163,7 +164,7 @@ async def process_deadline(message: Message, state: FSMContext, db: aiosqlite.Co
     )
 
 
-@tasks_router.callback_query(F.data == "skip:assignee", AddTask.waiting_for_assignee, state="*")
+@tasks_router.callback_query(F.data == "skip:assignee", StateFilter(AddTask.waiting_for_assignee))
 async def process_skip_assignee(callback: CallbackQuery, state: FSMContext, db: aiosqlite.Connection) -> None:
     """
     Обработчик пропуска исполнителя.
@@ -508,7 +509,7 @@ async def cmd_delete(message: Message, state: FSMContext, db: aiosqlite.Connecti
 
 
 # Обработка callback-вызовов для изменения статуса задачи.
-@tasks_router.callback_query(F.data.startswith("status:"), state="*")
+@tasks_router.callback_query(F.data.startswith("status:"), StateFilter("*"))
 async def process_status_change(callback: CallbackQuery, state: FSMContext, db: aiosqlite.Connection) -> None:
     """
     Обработчик изменения статуса задачи через inline-кнопки.
